@@ -1,0 +1,33 @@
+= rsntp
+
++rsntp+ is an experimental high-performance NTP server written in Rust. It does
+not implement a full NTP client and relies on another NTP client and server to
+be running on the system instead. It periodically updates its state to mirror
+the real NTP client/server and uses multiple threads to serve the current
+system time.
+
+By default, +rsntp+ uses one thread for IPv4 and another for IPv6. In order to
+get the best performance, it's necessary to increase the number of threads
+using the +--ipv4-threads+ and +--ipv6-threads+ options to correspond to the
+number of CPU cores available on the system.
+
+The real NTP client/server needs to be configured to listen on 127.0.0.1 on
+port 11123 (or another port if specified with the +--server-addr+ option). For
+instance, the following configuration should work with +chronyd+:
+
+----
+allow 127.0.0.1
+port 11123
+bindaddress 127.0.0.1
+----
+
+The following table shows the maximum number of NTP requests handled per second
+measured on a Linux machine with an Intel E5-1620 CPU (4 cores, 8 threads) and
+Intel i350 network card.
+
+|==========================================================
+| 1 thread	| 330 kpps
+| 2 threads	| 530 kpps
+| 3 threads	| 730 kpps
+| 4 threads	| 730 kpps
+|==========================================================

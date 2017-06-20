@@ -1,0 +1,12 @@
+[package]
+name = "rsntp"
+version = "0.0.1"
+authors = ["Miroslav Lichvar <mlichvar0@gmail.com>"]
+description = "Multi-threaded NTP server"
+license = "GPLv2+"
+
+[dependencies]
+byteorder = "1.0.0"
+getopts = "0.2.14"
+net2 = "0.2.29"
+rand = "0.3"
