@@ -431,6 +431,8 @@ fn main() {
 
     opts.optopt("4", "ipv4-threads", "set number of IPv4 server threads (1)", "NUM");
     opts.optopt("6", "ipv6-threads", "set number of IPv6 server threads (1)", "NUM");
+    opts.optopt("a", "ipv4-address", "set local address of IPv4 server sockets (0.0.0.0:123)", "ADDR:PORT");
+    opts.optopt("b", "ipv6-address", "set local address of IPv6 server sockets ([::]:123)", "ADDR:PORT");
     opts.optopt("s", "server-address", "set server address (127.0.0.1:11123)", "ADDR:PORT");
     opts.optflag("d", "debug", "Enable debug messages");
     opts.optflag("h", "help", "Print this help message");
@@ -452,13 +454,15 @@ fn main() {
     let server_addr = matches.opt_str("s").unwrap_or("127.0.0.1:11123".to_string());
     let n4 = matches.opt_str("4").unwrap_or("1".to_string()).parse().unwrap_or(1);
     let n6 = matches.opt_str("6").unwrap_or("1".to_string()).parse().unwrap_or(1);
+    let local_address4 = matches.opt_str("a").unwrap_or("0.0.0.0:123".to_string());
+    let local_address6 = matches.opt_str("b").unwrap_or("[::]:123".to_string());
 
     for _ in 0..n4 {
-        addrs.push("0.0.0.0:123".to_string());
+        addrs.push(local_address4.clone());
     }
 
     for _ in 0..n6 {
-        addrs.push("[::]:123".to_string());
+        addrs.push(local_address6.clone());
     }
 
     let server = NtpServer::new(addrs, server_addr, matches.opt_present("d"));
