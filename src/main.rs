@@ -178,7 +178,8 @@ impl NtpPacket {
     }
 
     fn is_request(&self) -> bool {
-        self.mode == 1 || self.mode == 3
+        self.mode == 1 || self.mode == 3 ||
+            (self.mode == 0 && self.version == 1 && self.remote_addr.port() != 123)
     }
 
     fn make_response(&self, state: &NtpServerState) -> Option<NtpPacket> {
