@@ -136,7 +136,7 @@ impl NtpPacket {
         let version = (buf[0] >> 3) & 0x7;
         let mode = buf[0] & 0x7;
 
-        if version > 4 {
+        if version < 1 || version > 4 {
             return Err(Error::new(ErrorKind::Other, "Unsupported version"));
         }
 
