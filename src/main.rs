@@ -327,7 +327,8 @@ impl NtpServer {
                                         println!("Thread #{} sent {:?}", thread_id, response);
                                     }
                                 },
-                                Err(e) => println!("Thread #{} failed to send packet: {}", thread_id, e)
+                                Err(e) => println!("Thread #{} failed to send packet to {}: {}",
+                                                   thread_id, response.remote_addr, e)
                             }
                         },
                         None => {}
