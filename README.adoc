@@ -22,12 +22,12 @@ bindaddress 127.0.0.1
 ----
 
 The following table shows the maximum number of NTP requests handled per second
-measured on a Linux machine with an Intel E5-1620 CPU (4 cores, 8 threads) and
-Intel i350 network card.
+measured on a Linux (4.16) machine with an Intel E5-1220 CPU (4 cores) and an
+Intel I350 network card (1 Gb/s).
 
 |==========================================================
-| 1 thread	| 330 kpps
-| 2 threads	| 530 kpps
-| 3 threads	| 730 kpps
-| 4 threads	| 730 kpps
+| 1 thread	| 430 kpps
+| 2 threads	| 750 kpps
+| 3 threads	| 1030 kpps
+| 4 threads	| 1100 kpps (maximum for 1 Gb/s)
 |==========================================================
