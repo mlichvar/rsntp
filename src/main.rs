@@ -258,7 +258,7 @@ struct NtpServerState {
 
 struct NtpServer {
     state: Arc<Mutex<NtpServerState>>,
-    local_addrs: Vec<String>,
+    sockets: Vec<UdpSocket>,
     server_addr: String,
     debug: bool,
 }
@@ -274,35 +274,44 @@ impl NtpServer {
             dispersion: NtpFracValue::zero(),
             delay: NtpFracValue::zero(),
         };
+
+        let mut sockets = vec![];
+
+        for addr in local_addrs {
+            let sockaddr = addr.parse().unwrap();
+
+            let udp_builder = match sockaddr {
+                SocketAddr::V4(_) => UdpBuilder::new_v4().unwrap(),
+                SocketAddr::V6(_) => UdpBuilder::new_v6().unwrap(),
+            };
+
+            let udp_builder_ref = match sockaddr {
+                SocketAddr::V4(_) => &udp_builder,
+                SocketAddr::V6(_) => udp_builder.only_v6(true).unwrap(),
+            };
+
+            let socket = match udp_builder_ref.reuse_port(true).unwrap().bind(sockaddr) {
+                Ok(s) => s,
+                Err(e) => panic!("Couldn't bind socket: {}", e)
+            };
+
+            sockets.push(socket);
+        }
+
         NtpServer{
             state: Arc::new(Mutex::new(state)),
-            local_addrs: local_addrs,
+            sockets: sockets,
             server_addr: server_addr,
             debug: debug,
         }
     }
 
-    fn process_requests(thread_id: u32, debug: bool, addr: SocketAddr, state: Arc<Mutex<NtpServerState>>) {
-        let udp_builder = match addr {
-            SocketAddr::V4(_) => UdpBuilder::new_v4().unwrap(),
-            SocketAddr::V6(_) => UdpBuilder::new_v6().unwrap(),
-        };
-
-        let udp_builder_ref = match addr {
-            SocketAddr::V4(_) => &udp_builder,
-            SocketAddr::V6(_) => udp_builder.only_v6(true).unwrap(),
-        };
-
-        let socket = match udp_builder_ref.reuse_port(true).unwrap().bind(addr) {
-            Ok(s) => s,
-            Err(e) => panic!("Couldn't bind socket: {}", e)
-        };
-
+    fn process_requests(thread_id: u32, debug: bool, socket: UdpSocket, state: Arc<Mutex<NtpServerState>>) {
         let mut last_update = NtpTimestamp::now();
         let mut cached_state: NtpServerState;
         cached_state = *state.lock().unwrap();
 
-        println!("Server thread #{} listening on {:?}", thread_id, &addr);
+        println!("Server thread #{} started", thread_id);
 
         loop {
             match NtpPacket::receive(&socket) {
@@ -403,13 +412,13 @@ impl NtpServer {
         let mut threads = vec![];
         let mut id = 0;
 
-        for addr in &self.local_addrs {
+        for socket in &self.sockets {
             id = id + 1;
             let state = self.state.clone();
-            let sockaddr = addr.parse().unwrap();
             let debug = self.debug;
+            let cloned_socket = socket.try_clone().unwrap();
 
-            threads.push(thread::spawn(move || {NtpServer::process_requests(id, debug, sockaddr, state); }));
+            threads.push(thread::spawn(move || {NtpServer::process_requests(id, debug, cloned_socket, state); }));
         }
 
         NtpServer::update_state(self.state.clone(), self.server_addr.parse().unwrap(), self.debug);
