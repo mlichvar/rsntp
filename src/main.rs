@@ -352,66 +352,61 @@ impl NtpServer {
     }
 
     fn update_state(state: Arc<Mutex<NtpServerState>>, addr: SocketAddr, debug: bool) {
-        loop {
-            let udp_builder = UdpBuilder::new_v4().unwrap();
-            let socket = udp_builder.bind("0.0.0.0:0").unwrap();
-            let request = NtpPacket::new_request(addr);
-            let mut new_state: Option<NtpServerState> = None;
+        let udp_builder = UdpBuilder::new_v4().unwrap();
+        let socket = udp_builder.bind("0.0.0.0:0").unwrap();
+        let request = NtpPacket::new_request(addr);
+        let mut new_state: Option<NtpServerState> = None;
 
-            socket.set_read_timeout(Some(Duration::new(1, 0))).unwrap();
+        socket.set_read_timeout(Some(Duration::new(1, 0))).unwrap();
 
-            match request.send(&socket) {
-                Ok(_) => {
-                    if debug {
-                        println!("Client sent {:?}", request);
-                    }
-                },
-                Err(e) => panic!("Client failed to send packet: {}", e)
-            }
-
-            loop {
-                let response = match NtpPacket::receive(&socket) {
-                    Ok(packet) => {
-                        if debug {
-                            println!("Client received {:?}", packet);
-                        }
-
-                        if !packet.is_valid_response(&request) {
-                            println!("Client received unexpected {:?}", packet);
-                            continue;
-                        }
-
-                        packet
-                    },
-                    Err(e) => {
-                        if debug {
-                            println!("Client failed to receive packet: {}", e);
-                        }
-                        break;
-                    }
-                };
-
-                new_state = Some(response.get_server_state());
-                break;
-            }
-
-            if let Ok(mut state) = state.lock() {
-                if let Some(new_state) = new_state {
-                    *state = new_state;
+        match request.send(&socket) {
+            Ok(_) => {
+                if debug {
+                    println!("Client sent {:?}", request);
                 }
+            },
+            Err(e) => panic!("Client failed to send packet: {}", e)
+        }
 
-                state.dispersion.increment();
+        loop {
+            let response = match NtpPacket::receive(&socket) {
+                Ok(packet) => {
+                    if debug {
+                        println!("Client received {:?}", packet);
+                    }
+
+                    if !packet.is_valid_response(&request) {
+                        println!("Client received unexpected {:?}", packet);
+                        continue;
+                    }
+
+                    packet
+                },
+                Err(e) => {
+                    if debug {
+                        println!("Client failed to receive packet: {}", e);
+                    }
+                    break;
+                }
+            };
+
+            new_state = Some(response.get_server_state());
+            break;
+        }
+
+        if let Ok(mut state) = state.lock() {
+            if let Some(new_state) = new_state {
+                *state = new_state;
             }
 
-            if let Some(_) = new_state {
-                thread::sleep(Duration::new(1, 0));
-            }
+            state.dispersion.increment();
         }
     }
 
     fn run(&self) {
         let mut threads = vec![];
         let mut id = 0;
+        let quit = false;
 
         for socket in &self.sockets {
             id = id + 1;
@@ -422,7 +417,11 @@ impl NtpServer {
             threads.push(thread::spawn(move || {NtpServer::process_requests(id, debug, cloned_socket, state); }));
         }
 
-        NtpServer::update_state(self.state.clone(), self.server_addr.parse().unwrap(), self.debug);
+        while ! quit {
+            NtpServer::update_state(self.state.clone(), self.server_addr.parse().unwrap(), self.debug);
+
+            thread::sleep(Duration::new(1, 0));
+        }
 
         for thread in threads {
             let _ = thread.join();
