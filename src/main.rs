@@ -17,6 +17,7 @@ extern crate byteorder;
 extern crate getopts;
 extern crate net2;
 extern crate rand;
+extern crate privdrop;
 
 use std::thread;
 use std::env;
@@ -444,6 +445,8 @@ fn main() {
     opts.optopt("a", "ipv4-address", "set local address of IPv4 server sockets (0.0.0.0:123)", "ADDR:PORT");
     opts.optopt("b", "ipv6-address", "set local address of IPv6 server sockets ([::]:123)", "ADDR:PORT");
     opts.optopt("s", "server-address", "set server address (127.0.0.1:11123)", "ADDR:PORT");
+    opts.optopt("u", "user", "run as USER", "USER");
+    opts.optopt("r", "root", "change root directory", "DIR");
     opts.optflag("d", "debug", "Enable debug messages");
     opts.optflag("h", "help", "Print this help message");
 
@@ -476,6 +479,15 @@ fn main() {
     }
 
     let server = NtpServer::new(addrs, server_addr, matches.opt_present("d"));
+
+    if matches.opts_present(&["r".to_string(), "u".to_string()]) {
+        privdrop::PrivDrop::default()
+            .chroot(matches.opt_str("r").unwrap_or("/".to_string()))
+            .user(&matches.opt_str("u").unwrap_or("root".to_string()))
+            .unwrap_or_else(|e| { panic!("Couldn't set user: {}", e) })
+            .apply()
+            .unwrap_or_else(|e| { panic!("Couldn't drop privileges: {}", e) });
+    }
 
     server.run();
 }
