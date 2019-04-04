@@ -352,10 +352,12 @@ impl NtpServer {
     }
 
     fn update_state(state: Arc<Mutex<NtpServerState>>, addr: SocketAddr, debug: bool) {
-        let udp_builder = UdpBuilder::new_v4().unwrap();
-        let socket = udp_builder.bind("0.0.0.0:0").unwrap();
         let request = NtpPacket::new_request(addr);
         let mut new_state: Option<NtpServerState> = None;
+        let socket = match addr {
+            SocketAddr::V4(_) => UdpBuilder::new_v4().unwrap().bind("0.0.0.0:0").unwrap(),
+            SocketAddr::V6(_) => UdpBuilder::new_v6().unwrap().bind("[::]:0").unwrap(),
+        };
 
         socket.set_read_timeout(Some(Duration::new(1, 0))).unwrap();
 
