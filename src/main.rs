@@ -367,7 +367,10 @@ impl NtpServer {
                     println!("Client sent {:?}", request);
                 }
             },
-            Err(e) => panic!("Client failed to send packet: {}", e)
+            Err(e) => {
+                println!("Client failed to send packet: {}", e);
+                return;
+            }
         }
 
         loop {
