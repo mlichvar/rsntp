@@ -21,13 +21,20 @@ port 11123
 bindaddress 127.0.0.1
 ----
 
-The following table shows the maximum number of NTP requests handled per second
-measured on a Linux (4.16) machine with an Intel E5-1220 CPU (4 cores) and an
-Intel I350 network card (1 Gb/s).
+The following graphs compare the +rsntp+ performance with +chronyd+ (version
+4.1), as measured by https://github.com/mlichvar/ntpperf[+ntpperf+]. The tests
+ran on a Linux machine with an Intel E5-1220 CPU (4 cores) and a 1Gb/s Intel
+I350 network card. The maximum rate of NTP requests and responses at the 1Gb/s
+speed is about 1100k per second.
 
-|==========================================================
-| 1 thread	| 430 kpps
-| 2 threads	| 750 kpps
-| 3 threads	| 1030 kpps
-| 4 threads	| 1100 kpps (maximum for 1 Gb/s)
-|==========================================================
+image::ntpperf.png[]
+
+The graphs show that with +rsntp+ the server starts dropping packets at a
+higher rate than +chronyd+ and its performance is more stable as the rate of
+requests is increasing. +chronyd+ does not use multiple threads as a server. It
+needs to be started in multiple instances sharing the server port in order to
+utilize multiple CPU cores. It starts dropping packets at a lower rate and the
+response rate is jumping up and down as the request rate is changing. With both
+implementations 4 threads/instances are needed on this system to fully saturate
+the 1Gb/s link without any packets dropped, but +rsntp+ with 3 threads is very
+close to it.
