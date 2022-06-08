@@ -488,7 +488,6 @@ fn main() {
         privdrop::PrivDrop::default()
             .chroot(matches.opt_str("r").unwrap_or("/".to_string()))
             .user(&matches.opt_str("u").unwrap_or("root".to_string()))
-            .unwrap_or_else(|e| { panic!("Couldn't set user: {}", e) })
             .apply()
             .unwrap_or_else(|e| { panic!("Couldn't drop privileges: {}", e) });
     }
