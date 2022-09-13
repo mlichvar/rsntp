@@ -60,7 +60,7 @@ impl NtpTimestamp {
     }
 
     fn diff_to_sec(&self, ts: &NtpTimestamp) -> f64 {
-        (self.ts - ts.ts) as i64 as f64 / 4294967296.0
+        (self.ts.wrapping_sub(ts.ts)) as i64 as f64 / 4294967296.0
     }
 
     fn read(buf: &[u8]) -> NtpTimestamp {
