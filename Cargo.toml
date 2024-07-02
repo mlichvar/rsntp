@@ -6,8 +6,8 @@ description = "Multi-threaded NTP server"
 license = "GPLv2+"
 
 [dependencies]
-byteorder = "1.2.0"
-getopts = "0.2.14"
-net2 = "0.2.29"
-privdrop = "0.5.2"
-rand = "0.6"
+byteorder = "1.5.0"
+getopts = "0.2.21"
+net2 = "0.2.39"
+privdrop = "0.5.4"
+rand = "0.8"
