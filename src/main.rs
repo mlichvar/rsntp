@@ -15,9 +15,14 @@
 
 extern crate byteorder;
 extern crate getopts;
+extern crate moka;
 extern crate net2;
-extern crate rand;
 extern crate privdrop;
+extern crate prometheus_client;
+extern crate rand;
+extern crate rustc_version_runtime;
+extern crate sysinfo;
+extern crate tiny_http;
 
 use std::thread;
 use std::env;
@@ -35,6 +40,9 @@ use net2::UdpBuilder;
 use net2::unix::UnixUdpBuilderExt;
 
 use rand::random;
+
+mod metrics;
+use metrics::events::PacketEvent;
 
 #[derive(Debug, Copy, Clone)]
 struct NtpTimestamp {
@@ -122,14 +130,22 @@ struct NtpPacket {
 }
 
 impl NtpPacket {
-    fn receive(socket: &UdpSocket) -> io::Result<NtpPacket> {
+    fn receive(socket: &UdpSocket, metrics: &Option<Arc<metrics::MetricsCollector>>, thread_id: u32) -> io::Result<NtpPacket> {
         let mut buf = [0; 1024];
 
         let (len, addr) = socket.recv_from(&mut buf)?;
 
+        if let Some(ref m) = metrics {
+            m.record_packet_size(len);
+            m.inc_client(addr.ip());
+        }
+
         let local_ts = NtpTimestamp::now();
 
         if len < 48 {
+            if let Some(ref m) = metrics {
+                m.update_packet_counter(PacketEvent::ServerPacketTooShort, thread_id);
+            }
             return Err(Error::new(ErrorKind::UnexpectedEof, "Packet too short"));
         }
 
@@ -138,7 +154,14 @@ impl NtpPacket {
         let mode = buf[0] & 0x7;
 
         if version < 1 || version > 4 {
+            if let Some(ref m) = metrics {
+                m.update_packet_counter(PacketEvent::ServerUnsupportedVersion, thread_id);
+            }
             return Err(Error::new(ErrorKind::Other, "Unsupported version"));
+        }
+
+        if let Some(ref m) = metrics {
+            m.update_packet_counter(PacketEvent::ServerRequestReceived, thread_id);
         }
 
         Ok(NtpPacket{
@@ -262,10 +285,11 @@ struct NtpServer {
     sockets: Vec<UdpSocket>,
     server_addr: String,
     debug: bool,
+    metrics: Option<Arc<metrics::MetricsCollector>>,
 }
 
 impl NtpServer {
-    fn new(local_addrs: Vec<String>, server_addr: String, debug: bool) -> NtpServer {
+    fn new(local_addrs: Vec<String>, server_addr: String, debug: bool, metrics: Option<Arc<metrics::MetricsCollector>>) -> NtpServer {
         let state = NtpServerState{
             leap: 0,
             stratum: 0,
@@ -304,10 +328,11 @@ impl NtpServer {
             sockets: sockets,
             server_addr: server_addr,
             debug: debug,
+            metrics: metrics,
         }
     }
 
-    fn process_requests(thread_id: u32, debug: bool, socket: UdpSocket, state: Arc<Mutex<NtpServerState>>) {
+    fn process_requests(thread_id: u32, debug: bool, socket: UdpSocket, state: Arc<Mutex<NtpServerState>>, metrics: Option<Arc<metrics::MetricsCollector>>) {
         let mut last_update = NtpTimestamp::now();
         let mut cached_state: NtpServerState;
         cached_state = *state.lock().unwrap();
@@ -315,7 +340,7 @@ impl NtpServer {
         println!("Server thread #{} started", thread_id);
 
         loop {
-            match NtpPacket::receive(&socket) {
+            match NtpPacket::receive(&socket, &metrics, thread_id) {
                 Ok(request) => {
                     if debug {
                         println!("Thread #{} received {:?}", thread_id, request);
@@ -333,25 +358,35 @@ impl NtpServer {
                         Some(response) => {
                             match response.send(&socket) {
                                 Ok(_) => {
+                                    if let Some(ref m) = metrics {
+                                        m.update_packet_counter(PacketEvent::ServerResponseSent, thread_id);
+                                    }
                                     if debug {
                                         println!("Thread #{} sent {:?}", thread_id, response);
                                     }
                                 },
-                                Err(e) => println!("Thread #{} failed to send packet to {}: {}",
-                                                   thread_id, response.remote_addr, e)
+                                Err(e) => {
+                                    if let Some(ref m) = metrics {
+                                        m.update_packet_counter(PacketEvent::ServerSendFailed, thread_id);
+                                    }
+                                    println!("Thread #{} failed to send packet to {}: {}", thread_id, response.remote_addr, e);
+                                }
                             }
                         },
-                        None => {}
+                        _none => {}
                     }
                 },
                 Err(e) => {
+                    if let Some(ref m) = metrics {
+                        m.update_packet_counter(PacketEvent::ServerReceiveFailed, thread_id);
+                    }
                     println!("Thread #{} failed to receive packet: {}", thread_id, e);
                 },
             }
         }
     }
 
-    fn update_state(state: Arc<Mutex<NtpServerState>>, addr: SocketAddr, debug: bool) {
+    fn update_state(state: Arc<Mutex<NtpServerState>>, addr: SocketAddr, debug: bool, metrics: Option<Arc<metrics::MetricsCollector>>) {
         let request = NtpPacket::new_request(addr);
         let mut new_state: Option<NtpServerState> = None;
         let socket = match addr {
@@ -363,24 +398,36 @@ impl NtpServer {
 
         match request.send(&socket) {
             Ok(_) => {
+                if let Some(ref m) = metrics {
+                    m.update_packet_counter(PacketEvent::ClientRequestSent, 0);
+                }
                 if debug {
                     println!("Client sent {:?}", request);
                 }
             },
             Err(e) => {
+                if let Some(ref m) = metrics {
+                    m.update_packet_counter(PacketEvent::ClientSendFailed, 0);
+                }
                 println!("Client failed to send packet: {}", e);
                 return;
             }
         }
 
         loop {
-            let response = match NtpPacket::receive(&socket) {
+            let response = match NtpPacket::receive(&socket, &None, 0) {
                 Ok(packet) => {
+                    if let Some(ref m) = metrics {
+                        m.update_packet_counter(PacketEvent::ClientResponseReceived, 0);
+                    }
                     if debug {
                         println!("Client received {:?}", packet);
                     }
 
                     if !packet.is_valid_response(&request) {
+                        if let Some(ref m) = metrics {
+                            m.update_packet_counter(PacketEvent::ClientInvalidResponse, 0);
+                        }
                         println!("Client received unexpected {:?}", packet);
                         continue;
                     }
@@ -388,6 +435,9 @@ impl NtpServer {
                     packet
                 },
                 Err(e) => {
+                    if let Some(ref m) = metrics {
+                        m.update_packet_counter(PacketEvent::ClientReceiveFailed, 0);
+                    }
                     if debug {
                         println!("Client failed to receive packet: {}", e);
                     }
@@ -419,11 +469,12 @@ impl NtpServer {
             let debug = self.debug;
             let cloned_socket = socket.try_clone().unwrap();
 
-            threads.push(thread::spawn(move || {NtpServer::process_requests(id, debug, cloned_socket, state); }));
+            let metrics_clone = self.metrics.clone();
+            threads.push(thread::spawn(move || {NtpServer::process_requests(id, debug, cloned_socket, state, metrics_clone); }));
         }
 
         while ! quit {
-            NtpServer::update_state(self.state.clone(), self.server_addr.parse().unwrap(), self.debug);
+            NtpServer::update_state(self.state.clone(), self.server_addr.parse().unwrap(), self.debug, self.metrics.clone());
 
             thread::sleep(Duration::new(1, 0));
         }
@@ -431,6 +482,47 @@ impl NtpServer {
         for thread in threads {
             let _ = thread.join();
         }
+    }
+}
+
+fn parse_client_cache_option(cache_str: &str) -> Option<(u64, u64)> {
+    let parts: Vec<&str> = cache_str.split(',').collect();
+    if parts.len() != 2 {
+        eprintln!("Invalid client cache format. Expected: limit,ttl (e.g., 64,60)");
+        return None;
+    }
+
+    let limit = match parts[0].trim().parse::<u64>() {
+        Ok(val) => val * 1024, // Convert Kb to bytes
+        Err(_) => {
+            eprintln!("Invalid limit '{}' - must be a number of Kb", parts[0].trim());
+            return None;
+        }
+    };
+
+    let ttl = match parts[1].trim().parse::<u64>() {
+        Ok(val) => val,
+        Err(_) => {
+            eprintln!("Invalid TTL '{}' - must be a number of seconds", parts[1].trim());
+            return None;
+        }
+    };
+
+    Some((limit, ttl))
+}
+
+fn initialize_metrics(metrics_address: Option<String>, client_cache_configs: &[(u64, u64)]) -> Option<Arc<metrics::MetricsCollector>> {
+    if let Some(address) = metrics_address {
+        let collector = Arc::new(metrics::MetricsCollector::new(client_cache_configs));
+        let server = metrics::MetricsServer::new(collector.clone(), address);
+        thread::spawn(move || {
+            if let Err(e) = server.start() {
+                eprintln!("Metrics server error: {}", e);
+            }
+        });
+        Some(collector)
+    } else {
+        None
     }
 }
 
@@ -451,6 +543,8 @@ fn main() {
     opts.optopt("s", "server-address", "set server address (127.0.0.1:11123)", "ADDR:PORT");
     opts.optopt("u", "user", "run as USER", "USER");
     opts.optopt("r", "root", "change root directory", "DIR");
+    opts.optopt("m", "metrics-address", "enable metrics endpoint on ADDR:PORT; default: metrics disabled", "ADDR:PORT");
+    opts.optmulti("c", "client-cache", "set client cache limit,ttl in Kb,seconds (e.g., 64,60) - multiple allowed, default: client cache disabled", "LIMIT,TTL");
     opts.optflag("d", "debug", "Enable debug messages");
     opts.optflag("h", "help", "Print this help message");
 
@@ -473,6 +567,11 @@ fn main() {
     let n6 = matches.opt_str("6").unwrap_or("1".to_string()).parse().unwrap_or(1);
     let local_address4 = matches.opt_str("a").unwrap_or("0.0.0.0:123".to_string());
     let local_address6 = matches.opt_str("b").unwrap_or("[::]:123".to_string());
+    let metrics_address = matches.opt_str("metrics-address");
+    let client_cache_configs: Vec<(u64, u64)> = matches.opt_strs("client-cache")
+        .iter()
+        .filter_map(|s| parse_client_cache_option(s))
+        .collect();
 
     for _ in 0..n4 {
         addrs.push(local_address4.clone());
@@ -482,7 +581,8 @@ fn main() {
         addrs.push(local_address6.clone());
     }
 
-    let server = NtpServer::new(addrs, server_addr, matches.opt_present("d"));
+    let metrics = initialize_metrics(metrics_address, &client_cache_configs);
+    let server = NtpServer::new(addrs, server_addr, matches.opt_present("d"), metrics);
 
     if matches.opts_present(&["r".to_string(), "u".to_string()]) {
         privdrop::PrivDrop::default()

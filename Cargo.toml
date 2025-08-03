@@ -1,6 +1,6 @@
 [package]
 name = "rsntp"
-version = "0.0.1"
+version = "0.1.1"
 authors = ["Miroslav Lichvar <mlichvar0@gmail.com>"]
 description = "Multi-threaded NTP server"
 license = "GPLv2+"
@@ -8,6 +8,14 @@ license = "GPLv2+"
 [dependencies]
 byteorder = "1.5.0"
 getopts = "0.2.21"
+moka = { version = "0.12", features = ["sync"] }
 net2 = "0.2.39"
 privdrop = "0.5.4"
+prometheus-client = "0.22"
 rand = "0.8"
+rustc_version_runtime = "0.3"
+sysinfo = "0.30"
+tiny_http = "0.12"
+
+[dev-dependencies]
+regex = "1.0"
