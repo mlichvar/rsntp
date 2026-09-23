@@ -1,0 +1,62 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo test
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+      - run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      - run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+      - run: tar -czf rsntp-${{ github.ref_name }}-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release rsntp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rsntp-${{ matrix.target }}
+          path: rsntp-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-gnu
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+      - run: |
+          gh release create ${{ github.ref_name }} \
+            rsntp-x86_64-unknown-linux-gnu/rsntp-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz \
+            rsntp-aarch64-unknown-linux-gnu/rsntp-${{ github.ref_name }}-aarch64-unknown-linux-gnu.tar.gz \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
